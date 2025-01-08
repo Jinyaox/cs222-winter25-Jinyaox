@@ -2,7 +2,6 @@
 #define _rbfm_h_
 
 #include <vector>
-
 #include "pfm.h"
 
 namespace PeterDB {
@@ -69,6 +68,14 @@ namespace PeterDB {
     class RecordBasedFileManager {
     public:
         static RecordBasedFileManager &instance();                          // Access to the singleton instance
+
+        //Helper Functions:
+        RC RecordBasedFileManager::dataparser(const std::vector<Attribute> &recordDescriptor,const void *data);
+
+
+
+
+        //Homework Functions:
 
         RC createFile(const std::string &fileName);                         // Create a new record-based file
 
