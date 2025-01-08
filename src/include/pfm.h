@@ -35,11 +35,15 @@ namespace PeterDB {
         unsigned readPageCounter;
         unsigned writePageCounter;
         unsigned appendPageCounter;
+        std::string fileName; //to just add a file name
+        static unsigned offsetCalulation(PageNum pageNum);
 
         FileHandle();                                                       // Default constructor
         ~FileHandle();                                                      // Destructor
 
         RC readPage(PageNum pageNum, void *data);                           // Get a specific page
+        RC initialize();                                                    // Read the header for the file and get counter values
+        RC finalize();                                                      // Write Back the Header for the File
         RC writePage(PageNum pageNum, const void *data);                    // Write a specific page
         RC appendPage(const void *data);                                    // Append a specific page
         unsigned getNumberOfPages();                                        // Get the number of pages in the file
