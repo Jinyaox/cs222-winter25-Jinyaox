@@ -69,10 +69,15 @@ namespace PeterDB {
     public:
         static RecordBasedFileManager &instance();                          // Access to the singleton instance
 
+        void memccpy(char * str, const void * p, int len);
+
         //Helper Functions:
-        RC RecordBasedFileManager::dataparser(const std::vector<Attribute> &recordDescriptor,const void *data);
+        int RecordBasedFileManager::dataparser(const std::vector<Attribute> &recordDescriptor,
+        const void *data, std::vector<std::vector<char>> &parsedData);
 
+        int RecordBasedFileManager::recordCreator(std::vector<std::vector<char>> &parsedData, char *data)
 
+        int RecordBasedFileManager:: free_space(PageNum pg,FileHandle &fileHandle);
 
 
         //Homework Functions:
