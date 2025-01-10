@@ -72,12 +72,12 @@ namespace PeterDB {
         void memccpy(char * str, const void * p, int len);
 
         //Helper Functions:
-        int RecordBasedFileManager::dataparser(const std::vector<Attribute> &recordDescriptor,
+        int dataparser(const std::vector<Attribute> &recordDescriptor,
         const void *data, std::vector<std::vector<char>> &parsedData);
 
-        int RecordBasedFileManager::recordCreator(std::vector<std::vector<char>> &parsedData, char *data)
+        int recordCreator(std::vector<std::vector<char>> &parsedData, char *data, char *orig_data, int nullsize);
 
-        int RecordBasedFileManager:: free_space(PageNum pg,FileHandle &fileHandle);
+        int free_space(PageNum pg,FileHandle &fileHandle);
 
 
         //Homework Functions:

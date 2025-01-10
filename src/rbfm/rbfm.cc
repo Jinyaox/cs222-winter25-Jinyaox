@@ -1,6 +1,10 @@
 #include "src/include/rbfm.h"
 #include <cmath>
 #include <cstring>
+#include <ostream>
+#include <bits/ios_base.h>
+#include <bits/locale_facets_nonio.h>
+
 #include "src/include/pfm.h"
 
 namespace PeterDB {
@@ -89,22 +93,24 @@ namespace PeterDB {
                     memcpy(segment.data(),data+offset,varcharLen);
                     parsedData.push_back(std::move(segment));
                     memset(data_buffer, 0, 2048);
+                    offset+=varcharLen;
                 }
             }
         }
-        return 0;
+        return nullIndicatorSize;
     }
 
 
     //define helper function: record creator, given a vector of information and RID
     //Structure the record as follows:
-    // RID || length (offset 4 bytes) || entry size(s) || entries
 
-    int RecordBasedFileManager::recordCreator(std::vector<std::vector<char>> &parsedData, char *data)
+    // RID ||  length (offset 4 bytes) || nullindicator || entry size(s) || entries
+
+    int RecordBasedFileManager::recordCreator(std::vector<std::vector<char>> &parsedData, char *data, char *orig_data, int nullsize)
     {
         int offset=6;
         //store the total length of the data string:
-        int total_len=10; //reserve for RID and length itself
+        int total_len=10+nullsize; //reserve for RID and length itself and null size
 
         //put the RID into the data first, this is a stub
         memcpy(data,"000000",6);
@@ -119,9 +125,13 @@ namespace PeterDB {
             total_len+=parsedData[i].size(); //for the entry length
         }
 
-        //Record how many entries in this data piece //Seg Fault here God Damn
+        //Record how many entries in this data piece
         memcpy(data+offset,&total_len,sizeof(int));
         offset += sizeof(int);
+
+        //store the null field information
+        memcpy(data+offset,orig_data,nullsize);
+        offset += nullsize;
 
         //create the entry size for the data
         for (int i = 0; i < fieldlength.size(); i++) {
@@ -173,13 +183,12 @@ namespace PeterDB {
         std::vector<std::vector<char>> parsed_data;
 
         //First parse the attribute descriptor to get information about data
-        dataparser(recordDescriptor,data,parsed_data);
+        int nullsize=dataparser(recordDescriptor,data,parsed_data);
 
         //Structure the record as follows:
         // RID || length (offset 4 bytes) || entry size(s) || entries
 
-        int size_of_rec=recordCreator(parsed_data,record);
-
+        int size_of_rec=recordCreator(parsed_data,record,(char*)data,nullsize);
 
         //Search through pages, and get the free space.
         int spaces=0;
@@ -229,25 +238,129 @@ namespace PeterDB {
 
     RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                           const RID &rid, void *data) {
+        // RID || length (offset 4 bytes) || nullindicator || entry size(s) || entries
+
         char buffer[PAGE_SIZE]; memset(buffer, 0, PAGE_SIZE);
         fileHandle.readPage(rid.pageNum,buffer);
 
         //now I need to extract the record with the known slot
         int read_cursor=6;
         int record_size=0;
+        int data_cursor=0;
+        int write_cursor=0;
 
-        for (int i=0;i<rid.slotNum;i++) {
-
+        //move the cursor to that slot
+        for (int i=0;i<rid.slotNum-1;i++) {
+            memcpy(&record_size,buffer+read_cursor,sizeof(int));
+            read_cursor+=record_size;
         }
-        memcpy(&record_size, buffer+read_cursor, sizeof(int));
-        memcpy(data,buffer+read_cursor+sizeof(int),record_size-10);
+        read_cursor+=4;
+
+        //first copy the null indicator
+        memcpy(data, buffer+read_cursor, std::ceil(static_cast<double>(recordDescriptor.size()) / 8));
+        read_cursor+=std::ceil(static_cast<double>(recordDescriptor.size()) / 8);
+        write_cursor+=std::ceil(static_cast<double>(recordDescriptor.size()) / 8);
+
+        //parse all the entry size and move to the entry part
+        data_cursor=read_cursor+(4*recordDescriptor.size());
+        for (int i=0;i<recordDescriptor.size();i++) {
+            memcpy(&record_size,buffer+read_cursor,sizeof(int));//get the size
+            memcpy(data+write_cursor,buffer+read_cursor,sizeof(int)); //write the size
+            write_cursor+=sizeof(int);
+            memcpy(data+write_cursor,buffer+data_cursor,record_size);
+            data_cursor+=record_size;
+            write_cursor+=record_size;
+        }
         return 0;
     }
 
     RC RecordBasedFileManager::printRecord(const std::vector<Attribute> &recordDescriptor, const void *data,
                                            std::ostream &out) {
-        return -1;
+
+        // dataparser(const std::vector<Attribute> &recordDescriptor,const void *data, std::vector<std::vector<char>> &parsedData);
+        // <AttributeName1>:\s<Value1>,\s<AttributeName2>:\s<Value2>,\s<AttributeName3>:\s<Value3>\n
+
+        std::vector<std::vector<char>> parsedData;
+        int nullIndicatorSize=dataparser(recordDescriptor,data,parsedData);
+        char null_buffer[nullIndicatorSize]; memset(null_buffer, 0, nullIndicatorSize);
+        strncpy(null_buffer,(char*)data,nullIndicatorSize);
+        int data_cursor=0;
+
+        for (int i = 0; i < recordDescriptor.size(); i++) {
+            //first check if that entry is null
+            char null_byte=null_buffer[i/8];
+            bool isOne = null_byte & (1 << i%8);
+            if (!isOne) {
+                if (i==recordDescriptor.size()-1) {
+                    if (recordDescriptor[i].type==TypeInt) {
+                        int value = 0;
+                        memcpy(&value, parsedData[data_cursor].data(), sizeof(int));
+                        out<<recordDescriptor[i].name+std::string(": ")<<value<<"\n";
+                    }
+                    if (recordDescriptor[i].type==TypeReal) {
+                        float val = 0;
+                        memcpy(&val, parsedData[data_cursor].data(), sizeof(float));
+                        out<<recordDescriptor[i].name+std::string(": ")<<val<<"\n";
+                    }
+                    if (recordDescriptor[i].type==TypeVarChar) {
+                        out<<recordDescriptor[i].name+std::string(": ")+parsedData[data_cursor].data()+"\n";
+                    }
+                }
+                else {
+                    if (recordDescriptor[i].type==TypeInt) {
+                        int value = 0;
+                        memcpy(&value, parsedData[data_cursor].data(), sizeof(int));
+                        out<<recordDescriptor[i].name+std::string(": ")<<value<<", ";
+                        data_cursor++;
+                    }
+                    if (recordDescriptor[i].type==TypeReal) {
+                        float val = 0;
+                        memcpy(&val, parsedData[data_cursor].data(), sizeof(float));
+                        out<<recordDescriptor[i].name+std::string(": ")<<val<<", ";
+                        data_cursor++;
+                    }
+                    if (recordDescriptor[i].type==TypeVarChar) {
+                        out<<recordDescriptor[i].name+std::string(": ")+parsedData[data_cursor].data()+", ";
+                        data_cursor++;
+                    }
+                }
+            }else {
+                if (i==recordDescriptor.size()-1) {
+                    out<<recordDescriptor[i].name+std::string(": ")+"NULL\n";
+                }
+                else {
+                    out<<recordDescriptor[i].name+std::string(": ")+"NULL, ";
+                }
+            }
+        }
+        return 0;
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     RC RecordBasedFileManager::deleteRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                         const RID &rid) {
