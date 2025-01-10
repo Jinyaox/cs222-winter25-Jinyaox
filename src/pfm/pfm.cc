@@ -76,7 +76,7 @@ namespace PeterDB {
     RC FileHandle::initialize() {
         if (this->fileName == "") {return -1;}
 
-        char buffer[PAGE_SIZE]={};
+        char buffer[PAGE_SIZE];memset(buffer,0,PAGE_SIZE);
 
         //read the first page of the file
         std::ifstream file(this->fileName); // Open file
@@ -111,7 +111,7 @@ namespace PeterDB {
     RC FileHandle::finalize() {
         // Buffers to hold individual numbers and the final concatenated string
         char read_ctr[1024], write_ctr[1024], append_ctr[1024];
-        char buffer[PAGE_SIZE] = {};
+        char buffer[PAGE_SIZE];memset(buffer,0,PAGE_SIZE);
 
         // Convert integers to C-strings
         sprintf(read_ctr, "%d", this->readPageCounter);
@@ -165,7 +165,7 @@ namespace PeterDB {
         if (file.fail()){return -1;}
 
 
-        char buffer[PAGE_SIZE] = {};
+        char buffer[PAGE_SIZE];memset(buffer,0,PAGE_SIZE);
         file.read(buffer,PAGE_SIZE);
         file.close();
         memcpy(data,buffer,strlen(buffer));
@@ -177,7 +177,7 @@ namespace PeterDB {
 
     RC FileHandle::writePage(PageNum pageNum, const void *data){
         //bug still exists, cannot append the page, solved Jan 7 0920.
-        char buffer[PAGE_SIZE] = {};
+        char buffer[PAGE_SIZE];memset(buffer,0,PAGE_SIZE);
         if (this->fileName.empty()) {
             return -1; //failed read page, no file initialized
         }

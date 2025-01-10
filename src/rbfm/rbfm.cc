@@ -45,7 +45,6 @@ namespace PeterDB {
         return -1;
     }
 
-
     int RecordBasedFileManager::dataparser(const std::vector<Attribute> &recordDescriptor,
         const void *data, std::vector<std::vector<char>> &parsedData)
     {
@@ -143,12 +142,26 @@ namespace PeterDB {
     }
 
 
-
     //calculate free space for a page, given a page number, return free space in that page.
     int RecordBasedFileManager:: free_space(PageNum pg,FileHandle &fileHandle) {
         char buffer[PAGE_SIZE]; memset(buffer, 0, PAGE_SIZE);
         fileHandle.readPage(pg,buffer);
-        return PAGE_SIZE-strlen(buffer);
+
+        //Read the Available Page into the buffer
+        int read_cursor=6;
+        int offset=0;
+
+        //read each record and move to the end of the buffer to get the slot
+        do {
+            memcpy(&offset,buffer+read_cursor,sizeof(int));
+            read_cursor+=offset; //since the offset already count in the 6 in its position it moves automatically
+            if (read_cursor>=PAGE_SIZE) {
+                return 0;
+            }
+        }while(offset!=0);
+
+        read_cursor-=6;//move to the first slot
+        return PAGE_SIZE-1-read_cursor;
     }
 
     RC RecordBasedFileManager::insertRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
@@ -156,6 +169,7 @@ namespace PeterDB {
         // RID || length (offset 4 bytes) || entry size(s) || entries
 
         char buffer[PAGE_SIZE]; memset(buffer, 0, PAGE_SIZE);
+        char record[1024]; memset(record, 0, 1024);
         std::vector<std::vector<char>> parsed_data;
 
         //First parse the attribute descriptor to get information about data
@@ -164,55 +178,79 @@ namespace PeterDB {
         //Structure the record as follows:
         // RID || length (offset 4 bytes) || entry size(s) || entries
 
-        int size_of_rec=recordCreator(parsed_data,buffer);
+        int size_of_rec=recordCreator(parsed_data,record);
+
 
         //Search through pages, and get the free space.
+        int spaces=0;
+        unsigned page=1;
+        unsigned short slot=1;
 
-        //Search the current indicator of the file
+        int availablePages=fileHandle.getNumberOfPages();
+        for (int i=0;i<availablePages;i++) {
+            page=i+1;
+            spaces=free_space(i,fileHandle);
+            if (spaces>=size_of_rec) {break;}
+        }
 
-        //write back to disk
+        //if no space is available, append a page
+        if (spaces<size_of_rec) {
+            //first write the record to the buffer and then append the buffer
+            rid.pageNum=page; rid.slotNum=slot;
+            std::memcpy(record, &rid.pageNum, sizeof(unsigned));
+            std::memcpy(record+sizeof(unsigned), &rid.slotNum, sizeof(unsigned short));
+            fileHandle.appendPage(record);
+        }
+        else {
+            //Read the Available Page into the buffer
+            int read_cursor=6;
+            int offset=0;
+            fileHandle.readPage(page,buffer);
+
+            //read each record and move to the end of the buffer to get the slot
+            do {
+                memcpy(&offset,buffer+read_cursor,sizeof(int));
+                read_cursor+=offset; //since the offset already count in the 6 in its position it moves automatically
+                slot++;
+            }while(offset!=0);
+
+            slot-=1;//get rid of the last while loop inc
+            read_cursor-=6;//move to the first slot
+            rid.pageNum=page; rid.slotNum=slot;
+            std::memcpy(record, &rid.pageNum, sizeof(unsigned));
+            std::memcpy(record+sizeof(unsigned), &rid.slotNum, sizeof(unsigned short));
+
+            std::memcpy(buffer+read_cursor, record, size_of_rec);
+            fileHandle.writePage(page,buffer);
+        }
 
         return 0;
     }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     RC RecordBasedFileManager::readRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                           const RID &rid, void *data) {
-        return -1;
-    }
+        char buffer[PAGE_SIZE]; memset(buffer, 0, PAGE_SIZE);
+        fileHandle.readPage(rid.pageNum,buffer);
 
-    RC RecordBasedFileManager::deleteRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
-                                            const RID &rid) {
-        return -1;
+        //now I need to extract the record with the known slot
+        int read_cursor=6;
+        int record_size=0;
+
+        for (int i=0;i<rid.slotNum;i++) {
+
+        }
+        memcpy(&record_size, buffer+read_cursor, sizeof(int));
+        memcpy(data,buffer+read_cursor+sizeof(int),record_size-10);
+        return 0;
     }
 
     RC RecordBasedFileManager::printRecord(const std::vector<Attribute> &recordDescriptor, const void *data,
                                            std::ostream &out) {
+        return -1;
+    }
+
+    RC RecordBasedFileManager::deleteRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
+                                        const RID &rid) {
         return -1;
     }
 
