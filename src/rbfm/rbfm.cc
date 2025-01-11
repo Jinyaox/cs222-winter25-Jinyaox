@@ -66,7 +66,7 @@ namespace PeterDB {
         for (int i = 0; i < numAttributes; i++) {
             //first check if that entry is null
             char null_byte=null_buffer[i/8];
-            bool isOne = null_byte & (1 << i%8);
+            bool isOne = null_byte & (1 << 8-(i%8)-1);
             if (!isOne) {
                 //retrieve information about the attribute
                 //deal with non var chars first
@@ -171,7 +171,7 @@ namespace PeterDB {
         }while(offset!=0);
 
         read_cursor-=6;//move to the first slot
-        return PAGE_SIZE-1-read_cursor;
+        return PAGE_SIZE-read_cursor;
     }
 
     RC RecordBasedFileManager::insertRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
@@ -186,18 +186,17 @@ namespace PeterDB {
         int nullsize=dataparser(recordDescriptor,data,parsed_data);
 
         //Structure the record as follows:
-        // RID || length (offset 4 bytes) || entry size(s) || entries
+        // RID ||  length (offset 4 bytes) || nullindicator || entry size(s) || entries
 
         int size_of_rec=recordCreator(parsed_data,record,(char*)data,nullsize);
 
         //Search through pages, and get the free space.
         int spaces=0;
-        unsigned page=1;
+        unsigned page=0;//0 indexing pages, compatiable with the filehandle I defined
         unsigned short slot=1;
 
         int availablePages=fileHandle.getNumberOfPages();
         for (int i=0;i<availablePages;i++) {
-            page=i+1;
             spaces=free_space(i,fileHandle);
             if (spaces>=size_of_rec) {break;}
         }
@@ -241,6 +240,8 @@ namespace PeterDB {
         // RID || length (offset 4 bytes) || nullindicator || entry size(s) || entries
 
         char buffer[PAGE_SIZE]; memset(buffer, 0, PAGE_SIZE);
+
+        //read page does not work (debugged Jan 11, page offset off by 1)
         fileHandle.readPage(rid.pageNum,buffer);
 
         //now I need to extract the record with the known slot
@@ -257,39 +258,67 @@ namespace PeterDB {
         read_cursor+=4;
 
         //first copy the null indicator
-        memcpy(data, buffer+read_cursor, std::ceil(static_cast<double>(recordDescriptor.size()) / 8));
-        read_cursor+=std::ceil(static_cast<double>(recordDescriptor.size()) / 8);
-        write_cursor+=std::ceil(static_cast<double>(recordDescriptor.size()) / 8);
+        int nullIndicatorSize=std::ceil(static_cast<double>(recordDescriptor.size()) / 8);
+        memcpy(data, buffer+read_cursor, nullIndicatorSize);
+        read_cursor+=nullIndicatorSize;
+        write_cursor+=nullIndicatorSize;
+
+        //initialize a null buffer to check read
+        char null_buffer[nullIndicatorSize]; memset(null_buffer, 0, nullIndicatorSize);
+        memcpy(null_buffer,buffer+read_cursor,nullIndicatorSize);
 
         //parse all the entry size and move to the entry part
         data_cursor=read_cursor+(4*recordDescriptor.size());
+
+        //contains parsing bugs (fixed Jan 11)
+        //contains data structure bug (only var char should have the initial part indicating length
+
         for (int i=0;i<recordDescriptor.size();i++) {
-            memcpy(&record_size,buffer+read_cursor,sizeof(int));//get the size
-            memcpy(data+write_cursor,buffer+read_cursor,sizeof(int)); //write the size
-            write_cursor+=sizeof(int);
-            memcpy(data+write_cursor,buffer+data_cursor,record_size);
-            data_cursor+=record_size;
-            write_cursor+=record_size;
+            //first check if that entry is null
+            char null_byte=null_buffer[i/8];
+            bool isOne = null_byte & (1 << 8-(i%8)-1);
+            if (isOne) {
+                continue;
+            }
+
+            if (recordDescriptor[i].type==TypeVarChar) {
+                memcpy(&record_size,buffer+read_cursor,sizeof(int));//get the size
+                memcpy(data+write_cursor,&record_size,sizeof(int)); //write the size
+                write_cursor+=sizeof(int);
+                read_cursor+=sizeof(int);
+                memcpy(data+write_cursor,buffer+data_cursor,record_size);
+                data_cursor+=record_size;
+                write_cursor+=record_size;
+            }
+            else {
+                memcpy(&record_size,buffer+read_cursor,sizeof(int));//get the size
+                read_cursor+=sizeof(int);
+                memcpy(data+write_cursor,buffer+data_cursor,record_size);
+                data_cursor+=record_size;
+                write_cursor+=record_size;
+            }
         }
         return 0;
     }
 
+    //this is debugged ok
     RC RecordBasedFileManager::printRecord(const std::vector<Attribute> &recordDescriptor, const void *data,
                                            std::ostream &out) {
 
         // dataparser(const std::vector<Attribute> &recordDescriptor,const void *data, std::vector<std::vector<char>> &parsedData);
         // <AttributeName1>:\s<Value1>,\s<AttributeName2>:\s<Value2>,\s<AttributeName3>:\s<Value3>\n
 
+        //still has issue about null record
         std::vector<std::vector<char>> parsedData;
         int nullIndicatorSize=dataparser(recordDescriptor,data,parsedData);
         char null_buffer[nullIndicatorSize]; memset(null_buffer, 0, nullIndicatorSize);
-        strncpy(null_buffer,(char*)data,nullIndicatorSize);
+        memcpy(null_buffer,data,nullIndicatorSize);
         int data_cursor=0;
 
         for (int i = 0; i < recordDescriptor.size(); i++) {
             //first check if that entry is null
             char null_byte=null_buffer[i/8];
-            bool isOne = null_byte & (1 << i%8);
+            bool isOne = null_byte & (1 << 8-(i%8)-1);
             if (!isOne) {
                 if (i==recordDescriptor.size()-1) {
                     if (recordDescriptor[i].type==TypeInt) {
@@ -335,32 +364,6 @@ namespace PeterDB {
         }
         return 0;
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     RC RecordBasedFileManager::deleteRecord(FileHandle &fileHandle, const std::vector<Attribute> &recordDescriptor,
                                         const RID &rid) {

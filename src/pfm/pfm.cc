@@ -168,7 +168,7 @@ namespace PeterDB {
         char buffer[PAGE_SIZE];memset(buffer,0,PAGE_SIZE);
         file.read(buffer,PAGE_SIZE);
         file.close();
-        memcpy(data,buffer,strlen(buffer));
+        memcpy(data,buffer,PAGE_SIZE);
         //now we increment the counter, if successful
         FileHandle::readPageCounter++;
         return 0;
